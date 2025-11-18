@@ -12,7 +12,7 @@ VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
 API_TOKEN = os.getenv("API_TOKEN")
 
 
-# 1️⃣ Verification endpoint (Facebook calls this once)
+# 1️ Verification endpoint (Facebook calls this once)
 @app.get("/webhook")
 async def verify(request: Request):
     mode = request.query_params.get("hub.mode")
@@ -26,11 +26,12 @@ async def verify(request: Request):
     return PlainTextResponse("Verification failed", status_code=403)
 
 
-# 2️⃣ Messenger sends messages here
+# 2️ Messenger sends messages here
 @app.post("/webhook")
 async def receive_message(request: Request):
+    print("POST request received at /webhook")
     data = await request.json()
-    print("📩 Incoming webhook:", data)
+    print("Incoming webhook:", data)
     return {"status": "ok"}  # Always respond 200 to messages
 
 
