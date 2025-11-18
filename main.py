@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Request
+from fastapi.responses import PlainTextResponse
 import os
 from dotenv import load_dotenv
 import uvicorn
@@ -18,8 +19,10 @@ async def verify(request: Request):
     challenge = request.query_params.get("hub.challenge")
 
     if mode == "subscribe" and token == VERIFY_TOKEN:
-        return int(challenge)   # MUST return challenge
-    return {"error": "Verification failed"}
+        # MUST return challenge as plain text, not JSON
+        return PlainTextResponse(challenge, status_code=200)
+
+    return PlainTextResponse("Verification failed", status_code=403)
 
 
 # 2️⃣ Messenger sends messages here
@@ -27,13 +30,9 @@ async def verify(request: Request):
 async def receive_message(request: Request):
     data = await request.json()
     print("📩 Incoming webhook:", data)
-    return {"status": "ok"}  # Always respond 200
+    return {"status": "ok"}  # Always respond 200 to messages
 
 
 if __name__ == "__main__":
     port = 8000
-    print(f"🚀 Starting FastAPI server on port {port}")
-    print(f"📋 Webhook endpoint: http://localhost:{port}/webhook")
-    
-    # Run FastAPI app
     uvicorn.run(app, host="0.0.0.0", port=port)
