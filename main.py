@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.responses import PlainTextResponse
 import os
 from dotenv import load_dotenv
@@ -33,11 +33,19 @@ async def verify(request: Request):
 
 # Receive messages endpoint
 @app.post("/webhook")
-async def receive_message(request: Request):
+async def receive_message(request: Request, background_tasks: BackgroundTasks):
     data = await request.json()
     print("Incoming webhook:", data)
 
-    # Send message back
+    # Process message in background to avoid Facebook retries
+    background_tasks.add_task(process_message, data)
+    
+    # Return 200 immediately so Facebook doesn't retry
+    return {"status": "ok"}
+
+
+# Process the message in the background
+def process_message(data: dict):
     try:
         # Extract Sender ID and message text
         message_payload = data["entry"][0]["messaging"][0]
@@ -56,8 +64,8 @@ async def receive_message(request: Request):
 
     except KeyError:
         print("No message payload found in the request.")
-
-    return {"status": "ok"}  # Always respond 200 to messages
+    except Exception as e:
+        print(f"Error processing message: {e}")
 
 # Send message to OpenAI
 def parse_message(user_message: str) -> dict:
