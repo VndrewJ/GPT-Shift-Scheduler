@@ -22,8 +22,8 @@ FB_MESSAGER_API_URL = "https://graph.facebook.com/v24.0/me/messages"
 # Structure for JSON response from Gemini
 class TimeSlot(BaseModel):
     day: str = Field(..., description="Day of the week")
-    start_time: str = Field(..., description="Start time in HH:MM format")
-    end_time: str = Field(..., description="End time in HH:MM format")
+    start_time: str = Field(..., description="Start time in 12-hour format with am/pm (e.g., 9am, 2pm)")
+    end_time: str = Field(..., description="End time in 12-hour format with am/pm (e.g., 5pm, 11pm)")
 
 # Initial verification endpoint (Required)
 @app.get("/webhook")
@@ -113,7 +113,8 @@ def parse_message(user_message: str) -> dict:
     system_instruction = (
             "You are an expert scheduling assistant. Your task is to extract three pieces of "
             "information from the user's message: the 'day', 'start_time', and 'end_time' of a "
-            "requested event. If any piece of information is missing or unclear, use the placeholder 'N/A'."
+            "requested event. Times must be in 12-hour format with am/pm (e.g., '9am', '2pm', '5pm'). "
+            "If any piece of information is missing or unclear, use the placeholder 'N/A'. "
             "You must return the output in the requested JSON format."
         )
 
