@@ -8,6 +8,7 @@ import json
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
+from typing import List
 import shift_service
 
 load_dotenv()
@@ -28,12 +29,15 @@ ERROR_MESSAGES = {
     shift_service.ERROR_DAY_LIMIT_REACHED: "Sorry, this day is already fully booked. Please choose another day.",
 }
 
-# Structure for JSON response from Gemini
-class TimeSlot(BaseModel):
+# Structures for JSON response from Gemini
+class SingleShiftModel(BaseModel):
     action: str = Field(..., description="Action to be performed (e.g., add, delete)")
     day: str = Field(..., description="Day of the week")
     start_time: str = Field(..., description="Start time in 12-hour format with am/pm (e.g., 9am, 2pm)")
     end_time: str = Field(..., description="End time in 12-hour format with am/pm (e.g., 5pm, 11pm)")
+
+class MultiShiftModel(BaseModel):
+    shifts: List[SingleShiftModel] = Field(..., description="List of shift models")
 
 # Initial verification endpoint (Required)
 @app.get("/webhook")
@@ -77,24 +81,42 @@ def process_message(data: dict):
             # Get name from sender ID
             name = get_user_name(sender_id)
 
-            # Action tree
-            if response_text.get('action') == 'add':
-                reply_text = insert_shift(
-                    name,
-                    response_text.get('day'),
-                    response_text.get('start_time'),
-                    response_text.get('end_time')
-                )
-            elif response_text.get('action') == 'delete':
-                reply_text = delete_shift(
-                    name,
-                    response_text.get('day')
-                )
-            else:
-                error_msg = ERROR_MESSAGES.get(shift_service.ERROR_INVALID_ACTION, "Invalid action. Please specify 'add' or 'delete'.")
-                reply_text = f"❌ {error_msg}"
+            # Collect all responses for multiple shifts
+            reply_texts = []
 
-            send_message(sender_id, reply_text)
+            # Process each shift in the list
+            for shift_request in response_text.get('shifts', []):
+                
+                # Action tree - get data from each individual shift
+                action = shift_request.get('action')
+                day = shift_request.get('day')
+                start_time = shift_request.get('start_time')
+                end_time = shift_request.get('end_time')
+                
+                if action == 'add':
+                    reply_text = insert_shift(
+                        name,
+                        day,
+                        start_time,
+                        end_time
+                    )
+                    reply_texts.append(reply_text)
+                elif action == 'delete':
+                    reply_text = delete_shift(
+                        name,
+                        day
+                    )
+                    reply_texts.append(reply_text)
+                else:
+                    error_msg = ERROR_MESSAGES.get(shift_service.ERROR_INVALID_ACTION, "Invalid action. Please specify 'add' or 'delete'.")
+                    reply_texts.append(f"❌ {error_msg}")
+
+            # Combine all responses and send as one message
+            if reply_texts:
+                combined_reply = "\n\n".join(reply_texts)
+                send_message(sender_id, combined_reply)
+            else:
+                send_message(sender_id, "I couldn't process your request. Please try again.")
 
     except KeyError:
         print("No message payload found in the request.")
@@ -153,13 +175,16 @@ def get_user_name(sender_id: str):
 def parse_message(user_message: str) -> dict:
 
     system_instruction = (
-            "You are an expert scheduling assistant. Your task is to extract four pieces of "
-            "information from the user's message: the 'day', 'start_time', 'end_time', and 'action' of a "
-            "requested event. Times must be in 12-hour format with am/pm (e.g., '9am', '2pm', '5pm'). "
-            "The action will either be 'add', or 'delete'. "
-            "If any piece of information is missing or unclear, use the placeholder 'N/A'. "
-            "You must return the output in the requested JSON format."
-        )
+        "You are an expert scheduling assistant. Your task is to parse the user's request "
+        "and extract all requested shift actions into a list of objects. "
+        "For a single request that specifies multiple days (e.g., 'Mon, Tue, Wed 9am-5pm'), "
+        "you must generate a separate object for each day with the same time. "
+        "Each object must contain the 'action', 'day', 'start_time', and 'end_time'. "
+        "Times must be in 12-hour format with am/pm (e.g., '9am', '2pm', '5pm'). "
+        "The 'action' must be 'add' (for add, schedule, create) or 'delete' (for delete, remove, cancel). " # Added Synonyms
+        "If any piece of information for a shift is missing or unclear, set the respective field to 'N/A'. "
+        "You must return the output in the requested JSON format containing the list of shifts."
+    )
 
     try:
         response = client.models.generate_content(
@@ -170,7 +195,7 @@ def parse_message(user_message: str) -> dict:
                 system_instruction=system_instruction,
                 # Specify the desired structured output format using the Pydantic schema
                 response_mime_type="application/json",
-                response_schema=TimeSlot,
+                response_schema=MultiShiftModel,
             )
         )
 
@@ -181,8 +206,8 @@ def parse_message(user_message: str) -> dict:
     except Exception as e:
         print(f"Error during Gemini API call: {e}")
         # Return default structure on failure to prevent the main process from crashing
-        return {"day": "N/A", "start_time": "N/A", "end_time": "N/A"}
-
+        return {"shifts": []}
+    
  
 
 # Send message back to user
